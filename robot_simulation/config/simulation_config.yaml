@@ -1,0 +1,26 @@
+# Simulation Configuration
+physics:
+  gravity: -9.81
+  fixed_time_step: 0.00416667  # 1/240
+  num_solver_iterations: 100
+  num_sub_steps: 4
+  contact_breaking_threshold: 0.0005
+
+robot:
+  description: "valkyrie_description"
+  spawn_height: 1.0
+  base_mass: 100.0
+
+stabilization:
+  steps: 10000
+  force_ramp_duration: 2000
+  leg_force: 8000
+  torso_force: 6000
+  base_force: 3000
+
+wave_motion:
+  frequency: 0.4
+  amplitude: 0.2
+  elbow_amplitude: 0.3
+  wrist_amplitude: 0.15
+  shoulder_lift: 0.2

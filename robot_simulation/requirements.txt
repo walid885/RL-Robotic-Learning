@@ -1,0 +1,5 @@
+pybullet>=3.2.0
+robot-descriptions>=1.0.0
+numpy>=1.21.0
+dataclasses>=0.8
+typing-extensions>=4.0.0
