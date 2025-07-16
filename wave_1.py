@@ -18,82 +18,86 @@ class JointInfo:
 @dataclass
 class SimulationConfig:
     gravity: float = -9.81
-    robot_height: float = 1.0  # Lower spawn height
-    stabilization_steps: int = 10000  # More stabilization steps
+    robot_height: float = 1.0  # Start higher, will settle down
+    stabilization_steps: int = 5000
     simulation_rate: float = 240.0
-    wave_frequency: float = 0.4  # Even slower
-    wave_amplitude: float = 0.2  # Smaller amplitude
-    elbow_wave_amplitude: float = 0.3
-    wrist_wave_amplitude: float = 0.15
+    wave_frequency: float = 0.3
+    wave_amplitude: float = 0.4
+    elbow_wave_amplitude: float = 0.6
+    wrist_wave_amplitude: float = 0.3
 
 @dataclass
 class WaveMotionConfig:
-    shoulder_lift: float = 0.2  # Further reduced
-    elbow_bend_base: float = 0.15
+    shoulder_lift: float = 0.4
+    elbow_bend_base: float = 0.2
     wrist_wave_speed: float = 0.8
-    compensation_force: float = 5000  # Much stronger
-    base_stabilization_force: float = 3000
-    leg_force: float = 8000  # Dedicated leg force
-    torso_force: float = 6000  # Dedicated torso force
+    compensation_force: float = 5000  # Reduced from 8000
+    base_stabilization_force: float = 3000  # Reduced from 6000
+    leg_force: float = 5000  # Reduced from 8000
+    torso_force: float = 4000  # Reduced from 8000
 
 def initialize_physics_engine() -> None:
-    """Initialize PyBullet with enhanced stability settings."""
+    """Initialize PyBullet with stable settings."""
     p.connect(p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
     
-    # High-friction ground
+    # Create ground plane
     plane_id = p.loadURDF("plane.urdf")
-    p.changeDynamics(plane_id, -1, lateralFriction=2.0, spinningFriction=0.5, rollingFriction=0.2)
+    p.changeDynamics(plane_id, -1, 
+                    lateralFriction=1.0, 
+                    spinningFriction=0.5, 
+                    rollingFriction=0.1,
+                    restitution=0.0)
     
-    # More stable physics
+    # More conservative physics settings
     p.setPhysicsEngineParameter(
         fixedTimeStep=1.0/240.0,
-        numSolverIterations=100,  # Doubled iterations
-        numSubSteps=4,  # More substeps
-        contactBreakingThreshold=0.0005,
+        numSolverIterations=50,  # Reduced from 150
+        numSubSteps=4,  # Reduced from 8
+        contactBreakingThreshold=0.001,
         enableConeFriction=True,
-        erp=0.8,  # Error reduction parameter
-        contactERP=0.8,
-        frictionERP=0.2
+        erp=0.2,  # Reduced from 0.9
+        contactERP=0.2,  # Reduced from 0.9
+        frictionERP=0.1,  # Reduced from 0.3
+        enableFileCaching=0,
+        restitutionVelocityThreshold=0.1,
+        deterministicOverlappingPairs=1,
+        allowedCcdPenetration=0.005
     )
 
 def load_robot(description: str, position: List[float]) -> int:
-    """Load robot with maximum stability settings."""
+    """Load robot with proper grounding."""
     robot_id = load_robot_description(description)
     
-    # Set position lower and add slight forward lean for stability
-    p.resetBasePositionAndOrientation(robot_id, position, [0, 0, 0, 1])
+    # Initial placement - start higher and let it settle
+    initial_position = [0, 0, 1.5]  # Start at 1.5m height
+    p.resetBasePositionAndOrientation(robot_id, initial_position, [0, 0, 0, 1])
     
-    num_joints = p.getNumJoints(robot_id)
-    
-    # Enhanced base dynamics
+    # Set conservative base dynamics
     p.changeDynamics(robot_id, -1, 
-                    linearDamping=0.4,  # Higher damping
-                    angularDamping=0.4,
-                    mass=100.0,  # Heavier for stability
-                    localInertiaDiagonal=[2, 2, 2])
+                    linearDamping=0.8,
+                    angularDamping=0.8,
+                    mass=80.0,  # Reduced from 120
+                    contactStiffness=10000,  # Reduced from 30000
+                    contactDamping=500)  # Reduced from 1000
     
-    # Enhanced joint dynamics
+    # Set all joints to zero initially
+    num_joints = p.getNumJoints(robot_id)
     for i in range(num_joints):
-        joint_info = p.getJointInfo(robot_id, i)
-        joint_name = joint_info[1].decode('utf-8').lower()
+        p.resetJointState(robot_id, i, 0.0)
         
-        # Different settings for different joint types
-        if 'leg' in joint_name or 'ankle' in joint_name or 'hip' in joint_name:
-            p.changeDynamics(robot_id, i, 
-                            linearDamping=0.5, 
-                            angularDamping=0.5,
-                            maxJointVelocity=0.5,
-                            jointDamping=0.2,
-                            frictionAnchor=1)
-        else:
-            p.changeDynamics(robot_id, i, 
-                            linearDamping=0.3, 
-                            angularDamping=0.3,
-                            maxJointVelocity=0.8,
-                            jointDamping=0.15,
-                            frictionAnchor=1)
+        # Conservative joint dynamics
+        p.changeDynamics(robot_id, i, 
+                        linearDamping=0.5, 
+                        angularDamping=0.5,
+                        maxJointVelocity=1.0,
+                        jointDamping=0.1)
+    
+    # Let robot settle naturally for a moment
+    for _ in range(1000):
+        p.stepSimulation()
+        time.sleep(1.0/240.0)
     
     return robot_id
 
@@ -163,231 +167,104 @@ def find_critical_balance_joints(joints: List[JointInfo]) -> Dict[str, List[Join
     return joint_categories
 
 def calculate_optimal_standing_pose(joint_categories: Dict[str, List[JointInfo]]) -> Dict[int, float]:
-    """Calculate optimal standing pose for maximum stability."""
+    """Calculate stable standing pose."""
     stable_positions = {}
     
-    # Hip joints: slight forward lean for stability
-    for joint in joint_categories['hip']:
-        if 'pitch' in joint.name.lower() or 'y' in joint.name.lower():
-            stable_positions[joint.id] = -0.1  # Slight forward lean
-        else:
-            stable_positions[joint.id] = 0.0
-    
-    # Knee joints: slight bend for shock absorption
-    for joint in joint_categories['knee']:
-        stable_positions[joint.id] = 0.05  # Very slight bend
-    
-    # Ankle joints: flat foot stance
-    for joint in joint_categories['ankle']:
-        stable_positions[joint.id] = 0.0
-    
-    # Torso: upright
-    for joint in joint_categories['torso']:
-        stable_positions[joint.id] = 0.0
-    
-    # Left arm: neutral position
-    for joint in joint_categories['shoulder_left']:
-        stable_positions[joint.id] = 0.0
-    for joint in joint_categories['elbow_left']:
-        stable_positions[joint.id] = 0.1  # Slight bend
-    
-    # Right arm: ready for waving
-    for joint in joint_categories['shoulder_right']:
-        stable_positions[joint.id] = 0.0
-    for joint in joint_categories['elbow_right']:
-        stable_positions[joint.id] = 0.1
-    for joint in joint_categories['wrist_right']:
-        stable_positions[joint.id] = 0.0
-    
-    # Other joints: current position
-    for joint in joint_categories['other']:
-        stable_positions[joint.id] = joint.current_position
+    # Keep all joints near zero for stability
+    for category, joints in joint_categories.items():
+        for joint in joints:
+            if 'knee' in joint.name.lower():
+                stable_positions[joint.id] = 0.05  # Very slight bend
+            else:
+                stable_positions[joint.id] = 0.0
     
     return stable_positions
-
-def enhanced_stabilization_control(robot_id: int, joint_categories: Dict[str, List[JointInfo]], 
-                                 stable_positions: Dict[int, float], wave_config: WaveMotionConfig,
-                                 step: int) -> None:
-    """Apply enhanced stabilization with progressive force ramping."""
-    
-    # Progressive force ramp-up
-    force_ramp = min(1.0, step / 2000.0)
-    
-    # Critical balance joints get maximum force
-    for joint in joint_categories['hip']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.leg_force * force_ramp,
-            position_gain=0.8, velocity_gain=0.5
-        )
-    
-    for joint in joint_categories['knee']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.leg_force * force_ramp,
-            position_gain=0.8, velocity_gain=0.5
-        )
-    
-    for joint in joint_categories['ankle']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.leg_force * force_ramp,
-            position_gain=0.9, velocity_gain=0.6
-        )
-    
-    for joint in joint_categories['torso']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.torso_force * force_ramp,
-            position_gain=0.7, velocity_gain=0.4
-        )
-    
-    # Left arm stabilization
-    for joint in joint_categories['shoulder_left']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.base_stabilization_force * force_ramp,
-            position_gain=0.6, velocity_gain=0.3
-        )
-    
-    for joint in joint_categories['elbow_left']:
-        set_joint_position_control(
-            robot_id, joint.id, stable_positions[joint.id], 
-            force=wave_config.base_stabilization_force * force_ramp,
-            position_gain=0.6, velocity_gain=0.3
-        )
 
 def set_joint_position_control(robot_id: int, joint_id: int, target_position: float, 
                              force: float = 500, position_gain: float = 0.3, 
                              velocity_gain: float = 0.1) -> None:
-    """Enhanced joint position control with velocity limiting."""
+    """Set joint position with conservative control."""
     p.setJointMotorControl2(
         robot_id, joint_id, p.POSITION_CONTROL,
         targetPosition=target_position,
         force=force,
         positionGain=position_gain,
         velocityGain=velocity_gain,
-        maxVelocity=0.3  # Further reduced for stability
+        maxVelocity=0.3  # Reduced from 0.5
     )
 
-def check_robot_stability(robot_id: int, step: int) -> bool:
-    """Check if robot is stable and upright."""
-    pos, orn = p.getBasePositionAndOrientation(robot_id)
-    linear_vel, angular_vel = p.getBaseVelocity(robot_id)
-    
-    # Calculate orientation from quaternion
-    euler = p.getEulerFromQuaternion(orn)
-    
-    # Check stability criteria
-    height_ok = pos[2] > 0.8  # Minimum height
-    tilt_ok = abs(euler[0]) < 0.3 and abs(euler[1]) < 0.3  # Not tilted too much
-    vel_ok = sum(v**2 for v in linear_vel)**0.5 < 1.0  # Not moving too fast
-    
-    if step % 2000 == 0:
-        print(f"Step {step}: H={pos[2]:.3f}, Tilt=({euler[0]:.3f},{euler[1]:.3f}), Vel={sum(v**2 for v in linear_vel)**0.5:.3f}")
-    
-    return height_ok and tilt_ok and vel_ok
-
-def stabilize_robot_enhanced(steps: int, robot_id: int, joint_categories: Dict[str, List[JointInfo]], 
-                           stable_positions: Dict[int, float], wave_config: WaveMotionConfig, 
-                           rate: float = 240.0) -> None:
-    """Enhanced multi-phase stabilization."""
-    print("Enhanced stabilization starting...")
+def stabilize_robot(robot_id: int, joint_categories: Dict[str, List[JointInfo]], 
+                   stable_positions: Dict[int, float], steps: int) -> None:
+    """Stabilize robot with gentle control."""
+    print("Stabilizing robot...")
     
     for i in range(steps):
-        # Apply enhanced stabilization control
-        enhanced_stabilization_control(robot_id, joint_categories, stable_positions, wave_config, i)
+        # Apply gentle stabilization to all joints
+        for joint_id, target_pos in stable_positions.items():
+            set_joint_position_control(robot_id, joint_id, target_pos, 
+                                     force=1000, position_gain=0.2, velocity_gain=0.1)
         
-        # Step simulation
         p.stepSimulation()
         
-        # Check stability
         if i % 1000 == 0:
-            is_stable = check_robot_stability(robot_id, i)
-            if not is_stable and i > 2000:
-                print(f"Warning: Robot unstable at step {i}")
+            pos, orn = p.getBasePositionAndOrientation(robot_id)
+            print(f"Step {i}: Height = {pos[2]:.3f}m")
         
-        time.sleep(1.0 / rate)
+        time.sleep(1.0/240.0)
     
     print("Stabilization complete!")
 
 def run_goodbye_waving_simulation(robot_id: int, config: SimulationConfig) -> None:
-    """Enhanced simulation with better stability management."""
-    wave_config = WaveMotionConfig()
-    
-    # Get and categorize joints
+    """Run waving simulation with stable base."""
+    # Get joints and calculate stable pose
     movable_joints = get_movable_joints(robot_id)
     joint_categories = find_critical_balance_joints(movable_joints)
-    
-    print(f"Found {len(movable_joints)} movable joints")
-    for category, joints in joint_categories.items():
-        if joints:
-            print(f"  {category}: {len(joints)} joints")
-    
-    # Calculate optimal standing pose
     stable_positions = calculate_optimal_standing_pose(joint_categories)
     
-    # Enhanced stabilization
-    stabilize_robot_enhanced(config.stabilization_steps, robot_id, joint_categories, 
-                           stable_positions, wave_config, config.simulation_rate)
+    print(f"Found {len(movable_joints)} movable joints")
     
-    print("Starting goodbye waving motion...")
+    # Stabilize first
+    stabilize_robot(robot_id, joint_categories, stable_positions, config.stabilization_steps)
+    
+    print("Starting waving motion...")
     
     step_count = 0
-    warmup_steps = 3000
-    
     try:
         while True:
-            # Always maintain balance
-            enhanced_stabilization_control(robot_id, joint_categories, stable_positions, 
-                                         wave_config, step_count)
+            # Maintain base stability
+            for category in ['hip', 'knee', 'ankle', 'torso']:
+                for joint in joint_categories[category]:
+                    set_joint_position_control(robot_id, joint.id, stable_positions[joint.id],
+                                             force=2000, position_gain=0.3, velocity_gain=0.2)
             
-            # Add waving motion after warmup
-            if step_count > warmup_steps:
-                # Simple waving motion for right arm
-                t = (step_count - warmup_steps) * 0.01
-                wave_factor = min(1.0, (step_count - warmup_steps) / 2000.0)
-                
-                # Gentle shoulder lift
-                shoulder_wave = 0.3 * wave_factor
-                for joint in joint_categories['shoulder_right']:
-                    if 'pitch' in joint.name.lower() or 'y' in joint.name.lower():
-                        target = stable_positions[joint.id] + shoulder_wave
-                        set_joint_position_control(robot_id, joint.id, target, 
-                                                 force=400, position_gain=0.3, velocity_gain=0.15)
-                
-                # Gentle elbow motion
-                elbow_wave = math.sin(t * config.wave_frequency * 2 * math.pi) * config.elbow_wave_amplitude
-                for joint in joint_categories['elbow_right']:
-                    target = stable_positions[joint.id] + (elbow_wave * wave_factor)
-                    set_joint_position_control(robot_id, joint.id, target,
-                                             force=300, position_gain=0.25, velocity_gain=0.12)
-                
-                # Gentle wrist motion
-                wrist_wave = math.sin(t * 1.2 * 2 * math.pi) * config.wrist_wave_amplitude
-                for joint in joint_categories['wrist_right']:
-                    target = stable_positions[joint.id] + (wrist_wave * wave_factor)
-                    set_joint_position_control(robot_id, joint.id, target,
-                                             force=200, position_gain=0.4, velocity_gain=0.1)
+            # Left arm stays stable
+            for joint in joint_categories['shoulder_left'] + joint_categories['elbow_left']:
+                set_joint_position_control(robot_id, joint.id, stable_positions[joint.id],
+                                         force=1000, position_gain=0.2, velocity_gain=0.1)
+            
+            # Right arm waves
+            t = step_count * 0.01
+            wave_amplitude = 0.3
+            
+            for joint in joint_categories['shoulder_right']:
+                if 'pitch' in joint.name.lower() or 'y' in joint.name.lower():
+                    wave_offset = math.sin(t * config.wave_frequency * 2 * math.pi) * wave_amplitude
+                    target = stable_positions[joint.id] + 0.5 + wave_offset
+                    set_joint_position_control(robot_id, joint.id, target, 
+                                             force=800, position_gain=0.3, velocity_gain=0.1)
+            
+            for joint in joint_categories['elbow_right']:
+                elbow_wave = math.sin(t * config.wave_frequency * 2 * math.pi) * 0.4
+                target = stable_positions[joint.id] + 0.3 + elbow_wave
+                set_joint_position_control(robot_id, joint.id, target,
+                                         force=600, position_gain=0.3, velocity_gain=0.1)
             
             p.stepSimulation()
-            time.sleep(1.0 / config.simulation_rate)
+            time.sleep(1.0/config.simulation_rate)
             step_count += 1
             
-            # Stability monitoring
-            if step_count % 2000 == 0:
-                is_stable = check_robot_stability(robot_id, step_count)
-                if not is_stable:
-                    print("Robot becoming unstable - increasing stabilization")
-                    # Could add emergency stabilization here
-                
-                if step_count == warmup_steps:
-                    print("Beginning waving motion...")
-    
     except KeyboardInterrupt:
-        print("Simulation stopped by user")
-    except Exception as e:
-        print(f"Simulation error: {e}")
+        print("Simulation stopped")
 
 def main():
     """Main entry point."""
@@ -401,7 +278,7 @@ def main():
         run_goodbye_waving_simulation(robot_id, config)
         
     except Exception as e:
-        print(f"Error in main: {e}")
+        print(f"Error: {e}")
     finally:
         p.disconnect()
 
