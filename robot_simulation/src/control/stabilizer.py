@@ -2,7 +2,7 @@
 import time
 from typing import Dict, List
 from ..core.joint_manager import JointManager
-from ..control.joint_controller import JointController
+from ..core.joint_controller import JointController
 from ..utils.data_structures import JointInfo, WaveMotionConfig, SimulationConfig
 from ..utils.monitoring import StabilityMonitor
 

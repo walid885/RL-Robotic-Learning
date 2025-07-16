@@ -1,9 +1,14 @@
 """Main simulation entry point."""
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from core.robot import Robot
 from physics.physics_engine import PhysicsEngine
-from control.stabilizer import RobotStabilizer
-from motion.wave_motion import WaveMotion
-from utils.data_structures import SimulationConfig
+from src.control.stabilizer import RobotStabilizer
+from src.motion.wave_motion import WaveMotion
+from src.utils.data_structures import SimulationConfig
 
 def main():
     """Main simulation entry point."""

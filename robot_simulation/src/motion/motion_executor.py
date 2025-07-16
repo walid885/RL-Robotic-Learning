@@ -1,7 +1,7 @@
 # src/motion/motion_executor.py
 import time
 from typing import Dict, Callable
-from ..control.joint_controller import JointController
+from control.joint_controller import JointController
 
 class MotionExecutor:
     """Execute complex motions with timing and coordination."""
