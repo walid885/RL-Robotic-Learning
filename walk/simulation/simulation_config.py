@@ -8,13 +8,11 @@ class SimulationConfig:
     
     # Physics settings
     gravity: float = -9.81
-    robot_height: float = 1.0  # Increased spawn height
-    stabilization_steps: int = 8000  # More stabilization steps
+    robot_height: float = 2.0  # Reduced height for stability
+    stabilization_steps: int = 2000  # Increased stabilization
     simulation_rate: float = 240.0
-    physics_timestep: float = 1.0/240.0
-    robot_height: float = 0.8  # Optimal starting height for humanoids
-    stabilization_steps: int = 3000
-    simulation_rate: float = 240.0
+    wave_frequency: float = 0.2  # Much slower wave
+    wave_amplitude: float = 0.05  # Reduced amplitude
 
     # Wave motion parameters
     wave_frequency: float = 0.15  # Reduced frequency for stability
@@ -53,7 +51,4 @@ class SimulationConfig:
     collision_margin: float = 0.01
     contact_breaking_threshold: float = 0.02
 
-    robot_height: float = 2.0
-    stabilization_steps: int = 2000
-    simulation_rate: float = 240.0
-2
+    
