@@ -196,7 +196,8 @@ class OptimizedSimulation:
                 
                 # Main simulation step
                 try:
-                    simulation_runner.step()
+                    simulation_runner.run_simulation_step()
+
                 except Exception as e:
                     print(f"Error in simulation step: {e}")
                     break
