@@ -4,7 +4,7 @@ class SimulationConfig:
         self.time_step = 1.0 / 240.0 # Physics simulation time step
         self.simulation_rate = 240 # GUI rendering rate (steps per second)
         self.stabilization_steps = 240 # Steps to run after reset for stabilization
-        self.robot_height = 1.0 # Initial spawn height for the robot's base
+        self.robot_height = 2.0 # Initial spawn height for the robot's base
         
         # Dynamics parameters
         self.linear_damping = 0.01

@@ -76,14 +76,28 @@ class ValkyrieStandEnv(gym.Env):
         # This is a critical part for stable learning!
         self.initial_joint_target_positions_dict = {
             # Example values, TUNE THESE FOR VALKYRIE
-            'leftHipYaw': 0.0, 'leftHipRoll': 0.0, 'leftHipPitch': -0.7,
-            'leftKneePitch': 1.4,
-            'leftAnklePitch': -0.7, 'leftAnkleRoll': 0.0,
-            'rightHipYaw': 0.0, 'rightHipRoll': 0.0, 'rightHipPitch': -0.7,
-            'rightKneePitch': 1.4,
-            'rightAnklePitch': -0.7, 'rightAnkleRoll': 0.0,
-            'torsoYaw': 0.0, 'torsoPitch': 0.0, 'torsoRoll': 0.0,
+        'leftHipYaw': 0.0,
+        'leftHipRoll': 0.0,
+        'leftHipPitch': -0.20,   # Slightly backward, keeps torso upright
+        'leftKneePitch': 0.40,   # Slight bend for compliance
+        'leftAnklePitch': -0.20, # Opposite of knee to keep foot flat
+        'leftAnkleRoll': 0.0,
+
+        'rightHipYaw': 0.0,
+        'rightHipRoll': 0.0,
+        'rightHipPitch': -0.20,  # Mirror left
+        'rightKneePitch': 0.40,
+        'rightAnklePitch': -0.20,
+        'rightAnkleRoll': 0.0,
+
+        'torsoYaw': 0.0,
+        'torsoPitch': 0.0,
+        'torsoRoll': 0.0,
         }
+   
+
+        self.initial_joint_target_positions_dict = {}
+
         # Convert to an array based on controlled_joint_indices order later in _get_joint_info
         self._initial_joint_target_positions_array = None
 
@@ -147,7 +161,7 @@ class ValkyrieStandEnv(gym.Env):
 
         # Populate the initial joint target positions array based on the sorted indices
         self._initial_joint_target_positions_array = np.array([
-            self.initial_joint_target_positions_dict.get(
+            self.initial_joint_target_positions.get(
                 p.getJointInfo(self.humanoid_id, joint_idx, self.physics_engine.client_id)[1].decode("utf-8"),
                 0.0 # Default to 0.0 if not specified
             ) for joint_idx in self.controlled_joint_indices

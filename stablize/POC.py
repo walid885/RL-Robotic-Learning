@@ -36,7 +36,7 @@ class TrainingMetrics:
     def __post_init__(self):
         if self.episode_rewards:
             self.avg_reward = np.mean(self.episode_rewards)
-            self.best_episode = np.argmax(self.episode_rewards)
+            self.best_episode = int(np.argmax(self.episode_rewards))  # Convert to int
         else:
             self.avg_reward = 0.0
             self.best_episode = -1
@@ -57,6 +57,7 @@ class ValkyrieEnv(gym.Env):
         else:
             self.physics_client = p.connect(p.DIRECT)
             
+        # Set search path immediately after connection
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         
         # Robot parameters
@@ -64,6 +65,22 @@ class ValkyrieEnv(gym.Env):
         self.plane_id = None
         self.initial_height = 2.0
         self.target_height = 1.95
+        
+        # Momentum tracking for reward improvement
+        self.prev_reward = 0.0
+        self.reward_momentum = 0.0
+        self.momentum_decay = 0.95
+        self.momentum_boost = 2.0
+        self.improvement_threshold = 0.01
+        
+        # Action momentum tracking
+        self.prev_action = None
+        self.action_momentum = None
+        self.action_momentum_decay = 0.9
+        
+        # Reward history for trend analysis
+        self.reward_history = []
+        self.reward_window = 10
         
         # Metrics tracking
         self.episode_metrics = []
@@ -92,12 +109,12 @@ class ValkyrieEnv(gym.Env):
         # Save previous episode metrics
         if self.collect_metrics and self.current_episode_data['rewards']:
             self.episode_metrics.append({
-                'total_reward': sum(self.current_episode_data['rewards']),
-                'avg_height': np.mean(self.current_episode_data['heights']),
-                'avg_orientation': np.mean(self.current_episode_data['orientations']),
-                'total_energy': sum(self.current_episode_data['energy']),
-                'avg_stability': np.mean(self.current_episode_data['stability']),
-                'episode_length': len(self.current_episode_data['rewards'])
+                'total_reward': float(sum(self.current_episode_data['rewards'])),  # Ensure float
+                'avg_height': float(np.mean(self.current_episode_data['heights'])),
+                'avg_orientation': float(np.mean(self.current_episode_data['orientations'])),
+                'total_energy': float(sum(self.current_episode_data['energy'])),
+                'avg_stability': float(np.mean(self.current_episode_data['stability'])),
+                'episode_length': int(len(self.current_episode_data['rewards']))
             })
         
         # Reset episode data
@@ -109,8 +126,18 @@ class ValkyrieEnv(gym.Env):
             'stability': []
         }
         
+        # Reset momentum tracking
+        self.prev_reward = 0.0
+        self.reward_momentum = 0.0
+        self.prev_action = None
+        self.action_momentum = None
+        self.reward_history = []
+        
         # Reset simulation
         p.resetSimulation(self.physics_client)
+        
+        # Re-set search path and physics after reset
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
         p.setTimeStep(self.time_step)
         
@@ -209,7 +236,7 @@ class ValkyrieEnv(gym.Env):
         
         # Get observation and calculate metrics
         obs = self._get_observation()
-        reward, metrics = self._calculate_reward(action)
+        reward, metrics = self._calculate_reward_with_momentum(action)
         
         # Check termination
         terminated = self._is_terminated()
@@ -226,7 +253,9 @@ class ValkyrieEnv(gym.Env):
             'orientation_penalty': metrics['orientation_penalty'],
             'stability_score': metrics['stability_score'],
             'energy_consumption': metrics['energy_consumption'],
-            'standing_time': self.standing_time
+            'standing_time': self.standing_time,
+            'reward_momentum': self.reward_momentum,
+            'reward_trend': self._get_reward_trend()
         }
         
         if self.render_mode == "human":
@@ -278,8 +307,60 @@ class ValkyrieEnv(gym.Env):
         
         return np.array(obs, dtype=np.float32)
     
-    def _calculate_reward(self, action):
-        """Calculate reward and metrics"""
+    def _calculate_reward_with_momentum(self, action):
+        """Calculate reward with momentum-based improvements"""
+        # Calculate base reward
+        base_reward, metrics = self._calculate_base_reward(action)
+        
+        # Update reward history
+        self.reward_history.append(base_reward)
+        if len(self.reward_history) > self.reward_window:
+            self.reward_history.pop(0)
+        
+        # Calculate reward improvement
+        reward_improvement = base_reward - self.prev_reward
+        
+        # Update momentum based on improvement
+        if reward_improvement > self.improvement_threshold:
+            # Reward is improving, boost momentum
+            self.reward_momentum = self.reward_momentum * self.momentum_decay + reward_improvement * self.momentum_boost
+            
+            # Apply action momentum if we have previous action
+            if self.prev_action is not None:
+                if self.action_momentum is None:
+                    self.action_momentum = np.zeros_like(action)
+                
+                # Calculate action difference that led to improvement
+                action_diff = action - self.prev_action
+                self.action_momentum = self.action_momentum * self.action_momentum_decay + action_diff * 0.1
+        else:
+            # Reward is not improving, decay momentum
+            self.reward_momentum *= self.momentum_decay
+            if self.action_momentum is not None:
+                self.action_momentum *= self.action_momentum_decay
+        
+        # Calculate trend bonus
+        trend_bonus = self._calculate_trend_bonus()
+        
+        # Apply momentum bonus
+        momentum_bonus = max(0, self.reward_momentum)
+        
+        # Final reward with momentum
+        final_reward = base_reward + momentum_bonus + trend_bonus
+        
+        # Update for next step
+        self.prev_reward = base_reward
+        self.prev_action = action.copy()
+        
+        # Add momentum info to metrics
+        metrics['momentum_bonus'] = momentum_bonus
+        metrics['trend_bonus'] = trend_bonus
+        metrics['reward_improvement'] = reward_improvement
+        
+        return final_reward, metrics
+    
+    def _calculate_base_reward(self, action):
+        """Calculate base reward (original reward function)"""
         # Get current state
         base_pos, base_orn = p.getBasePositionAndOrientation(self.robot_id)
         euler = p.getEulerFromQuaternion(base_orn)
@@ -332,6 +413,27 @@ class ValkyrieEnv(gym.Env):
         
         return total_reward, metrics
     
+    def _calculate_trend_bonus(self):
+        """Calculate bonus based on reward trend"""
+        if len(self.reward_history) < 3:
+            return 0.0
+        
+        # Calculate trend over recent rewards
+        recent_rewards = self.reward_history[-3:]
+        if len(recent_rewards) >= 2:
+            # Simple trend: compare last reward with average of previous
+            trend = recent_rewards[-1] - np.mean(recent_rewards[:-1])
+            return max(0, trend * 0.1)  # Small bonus for positive trend
+        
+        return 0.0
+    
+    def _get_reward_trend(self):
+        """Get current reward trend indicator"""
+        if len(self.reward_history) < 2:
+            return 0.0
+        
+        return self.reward_history[-1] - self.reward_history[-2]
+    
     def _calculate_stability_score(self, height, orientation_penalty):
         """Calculate stability score (0-1)"""
         height_score = max(0, min(1, (height - 1.0) / 1.0))
@@ -362,17 +464,17 @@ class ValkyrieEnv(gym.Env):
         if not self.episode_metrics:
             return TrainingMetrics([], [], [], [], [], [], 0.0, 0.0, -1)
         
-        episode_rewards = [ep['total_reward'] for ep in self.episode_metrics]
-        standing_times = [ep['episode_length'] for ep in self.episode_metrics]
-        heights = [ep['avg_height'] for ep in self.episode_metrics]
-        orientations = [ep['avg_orientation'] for ep in self.episode_metrics]
-        energy_consumption = [ep['total_energy'] for ep in self.episode_metrics]
-        stability_scores = [ep['avg_stability'] for ep in self.episode_metrics]
+        episode_rewards = [float(ep['total_reward']) for ep in self.episode_metrics]
+        standing_times = [float(ep['episode_length']) for ep in self.episode_metrics]
+        heights = [float(ep['avg_height']) for ep in self.episode_metrics]
+        orientations = [float(ep['avg_orientation']) for ep in self.episode_metrics]
+        energy_consumption = [float(ep['total_energy']) for ep in self.episode_metrics]
+        stability_scores = [float(ep['avg_stability']) for ep in self.episode_metrics]
         
         # Calculate success rate (episodes where robot stayed up > 75% of time)
         successful_episodes = sum(1 for ep in self.episode_metrics 
                                 if ep['avg_stability'] > 0.75)
-        success_rate = successful_episodes / len(self.episode_metrics)
+        success_rate = float(successful_episodes / len(self.episode_metrics))
         
         return TrainingMetrics(
             episode_rewards=episode_rewards,
@@ -461,9 +563,9 @@ class ValkyrieEnv(gym.Env):
         data = {
             'timestamp': datetime.now().isoformat(),
             'total_episodes': len(metrics.episode_rewards),
-            'success_rate': metrics.success_rate,
-            'average_reward': metrics.avg_reward,
-            'best_episode': metrics.best_episode,
+            'success_rate': float(metrics.success_rate),  # Ensure float
+            'average_reward': float(metrics.avg_reward),
+            'best_episode': int(metrics.best_episode),  # Ensure int
             'episode_data': self.episode_metrics
         }
         
@@ -501,7 +603,8 @@ def train_valkyrie(episodes=100, render=False):
             if step_count % 500 == 0:
                 print(f"  Step {step_count}: Reward={reward:.3f}, "
                       f"Height={info['height']:.3f}, "
-                      f"Stability={info['stability_score']:.3f}")
+                      f"Stability={info['stability_score']:.3f}, "
+                      f"Momentum={info['reward_momentum']:.3f}")
             
             if terminated or truncated:
                 break
@@ -547,7 +650,8 @@ def test_environment():
         obs, reward, terminated, truncated, info = env.step(action)
         
         if i % 20 == 0:
-            print(f"Step {i}: Reward={reward:.3f}, Height={info['height']:.3f}")
+            print(f"Step {i}: Reward={reward:.3f}, Height={info['height']:.3f}, "
+                  f"Momentum={info['reward_momentum']:.3f}")
         
         if terminated or truncated:
             break
