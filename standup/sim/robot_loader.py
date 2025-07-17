@@ -42,7 +42,7 @@ class RobotLoader:
         if orientation is None:
             orientation = [0, 0, 0, 1] # Identity quaternion
             
-        robot_id = load_robot_description(description, physicsClient=self.physics_engine.client_id)
+        robot_id = load_robot_description(description, physicsClientId=self.physics_engine.client_id)
         p.resetBasePositionAndOrientation(robot_id, position, orientation, physicsClientId=self.physics_engine.client_id)
         
         self._configure_robot_dynamics(robot_id)

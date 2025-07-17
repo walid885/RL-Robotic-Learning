@@ -1,16 +1,16 @@
-# valkyrie_env.py
 import gymnasium as gym
 from gymnasium import spaces
 import pybullet as p
+import pybullet_data
 import numpy as np
 import os
 
 # Import your simulation components
 from robot_descriptions.loaders.pybullet import load_robot_description
-
 from sim.physics_engine import PhysicsEngine
 from sim.robot_loader import RobotLoader
 from sim.simulation_config import SimulationConfig
+
 # from simulation.joint_utils import JointAnalyzer # If you need this for complex parsing later
 
 
@@ -369,9 +369,13 @@ def load_robot(description: str, position: list[float]) -> int:
 
 # --- Helper to list Valkyrie joints for configuration ---
 def list_valkyrie_joints_from_description():
+    from sim.simulation_config import SimulationConfig
+    config = SimulationConfig()  # Add this line
+    
     cid = p.connect(p.DIRECT)
     try:
-        valkyrie = load_robot("valkyrie_description", [0, 0, config.robot_height])
+        valkyrie = load_robot_description("valkyrie_description", physicsClientId=cid)
+        p.resetBasePositionAndOrientation(valkyrie, [0, 0, config.robot_height], [0, 0, 0, 1], physicsClientId=cid)
 
         num_joints = p.getNumJoints(valkyrie, physicsClientId=cid)
         print(f"\n--- Joints and Links for Valkyrie from robot_descriptions ---")
@@ -380,7 +384,7 @@ def list_valkyrie_joints_from_description():
             joint_id = joint_info[0]
             joint_name = joint_info[1].decode("utf-8")
             joint_type = joint_info[2]
-            link_name = joint_info[12].decode("utf-8") # Link name associated with this joint
+            link_name = joint_info[12].decode("utf-8")
             print(f"ID: {joint_id}, Name: {joint_name}, Type: {joint_type} ({'Revolute' if joint_type == p.JOINT_REVOLUTE else 'Prismatic' if joint_type == p.JOINT_PRISMATIC else 'Fixed'}), Link: {link_name}")
     except Exception as e:
         print(f"Error loading Valkyrie description to list joints: {e}")
@@ -389,7 +393,6 @@ def list_valkyrie_joints_from_description():
         p.disconnect(cid)
     print("\n--- End Joint List ---")
     print("Carefully select `VALKYRIE_CONTROLLABLE_JOINT_NAMES` and foot/torso link names based on this output.")
-
 
 if __name__ == '__main__':
     # Run this first to identify correct joint names and foot/torso links!
