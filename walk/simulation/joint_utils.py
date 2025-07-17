@@ -19,7 +19,6 @@ class JointAnalyzer:
             limits=(joint_info[8], joint_info[9]),
             current_position=joint_state[0]
         )
-    
     def get_movable_joints(self, robot_id: int) -> List[JointInfo]:
         """Get all movable joints from robot."""
         num_joints = p.getNumJoints(robot_id)
