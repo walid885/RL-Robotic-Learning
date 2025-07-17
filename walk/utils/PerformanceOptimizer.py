@@ -1,185 +1,210 @@
+# utils/PerformanceOptimizer.py
+import psutil
+import time
 import pybullet as p
+from typing import Dict, Any
 import numpy as np
-from dataclasses import dataclass
-from typing import Optional
 
-from config import PerformanceConfig
 class PerformanceOptimizer:
-    """Handles performance optimizations for the simulation."""
+    """Performance optimization utilities for PyBullet simulation."""
     
-    def __init__(self, config: PerformanceConfig):
+    def __init__(self, config):
         self.config = config
-        self.setup_numpy_optimizations()
+        self.last_performance_check = time.time()
         
-    def setup_numpy_optimizations(self):
-        """Configure NumPy for optimal performance on Ryzen 5 5600H."""
-        # Set NumPy to use all available threads
-        import os
-        os.environ['OMP_NUM_THREADS'] = str(self.config.cpu_threads)
-        os.environ['MKL_NUM_THREADS'] = str(self.config.cpu_threads)
-        os.environ['NUMEXPR_NUM_THREADS'] = str(self.config.cpu_threads)
+    def optimize_for_ryzen_5600h(self):
+        """Optimize settings specifically for Ryzen 5 5600H processor."""
+        print("Applying Ryzen 5 5600H optimizations...")
         
-        # Enable fast math optimizations
-        np.seterr(all='ignore')  # Ignore minor numerical errors for speed
+        # Ryzen 5 5600H has 6 cores, 12 threads
+        # Optimize thread count for this CPU
+        self.config.recommended_workers = min(6, psutil.cpu_count())
+        
+        # Optimize physics timestep for this CPU performance
+        self.config.physics_timestep = 1.0 / 240.0  # 240 Hz for good performance
+        self.config.render_timestep = 1.0 / 60.0    # 60 FPS rendering
+        
+        # Memory optimizations
+        self.config.collision_margin = 0.001
+        self.config.contact_breaking_threshold = 0.001
+        
+        # Try to set CPU affinity and priority (optional optimizations)
+        self.setup_cpu_optimizations()
+        
+        print(f"Optimized for Ryzen 5 5600H: {self.config.recommended_workers} workers")
+        
+    def setup_cpu_optimizations(self):
+        """Setup CPU optimizations with proper error handling."""
+        try:
+            current_process = psutil.Process()
+            
+            # Set CPU affinity to use all available cores
+            available_cores = list(range(psutil.cpu_count()))
+            current_process.cpu_affinity(available_cores)
+            print(f"Set CPU affinity to cores: {available_cores}")
+            
+            # Try to set higher priority (this might fail without sudo)
+            try:
+                import os
+                if os.name == 'posix':  # Linux/Mac
+                    current_process.nice(-5)  # Less aggressive than -10
+                else:  # Windows
+                    current_process.nice(psutil.HIGH_PRIORITY_CLASS)
+                print("Successfully set higher process priority")
+            except (psutil.AccessDenied, PermissionError):
+                print("Warning: Cannot set higher priority without elevated permissions")
+                print("Running with default priority (this is fine for most cases)")
+                
+        except Exception as e:
+            print(f"CPU optimization warning: {e}")
+            print("Continuing with default CPU settings")
         
     def configure_pybullet(self):
         """Configure PyBullet for optimal performance."""
-        # Set physics engine parameters
-        p.setPhysicsEngineParameter(
-            numSolverIterations=self.config.solver_iterations,
-            numSubSteps=self.config.max_sub_steps,
-            constraintSolverType=p.CONSTRAINT_SOLVER_LCP_DANTZIG,
-            erp=0.1,
-            contactERP=0.1,
-            frictionERP=0.1,
-            enableConeFriction=int(self.config.enable_cone_friction),
-            deterministicOverlappingPairs=1,
-            allowedCcdPenetration=0.01,
-            enableFileCaching=1
-        )
-        
-        # Configure time step
-        p.setTimeStep(self.config.physics_timestep)
-        
-        # Disable unnecessary features for speed
-        p.configureDebugVisualizer(
-            p.COV_ENABLE_SHADOWS, int(self.config.enable_shadows)
-        )
-        p.configureDebugVisualizer(
-            p.COV_ENABLE_WIREFRAME, int(self.config.enable_wireframe)
-        )
-        p.configureDebugVisualizer(
-            p.COV_ENABLE_GUI, int(self.config.enable_gui)
-        )
-        
-        # Set camera for optimal viewing
-        p.resetDebugVisualizerCamera(
-            cameraDistance=self.config.camera_distance,
-            cameraPitch=self.config.camera_pitch,
-            cameraYaw=self.config.camera_yaw,
-            cameraTargetPosition=[0, 0, 1]
-        )
-        
-    def setup_memory_management(self):
-        """Setup memory management for optimal performance."""
-        import gc
-        
-        # Configure garbage collection for real-time performance
-        gc.set_threshold(
-            self.config.garbage_collection_frequency,
-            10,
-            10
-        )
-        
-        # Enable memory pooling if supported
-        if self.config.enable_memory_pooling:
-            try:
-                import psutil
-                # Monitor memory usage
-                memory_info = psutil.virtual_memory()
-                if memory_info.percent > 80:
-                    print("Warning: High memory usage detected")
-                    gc.collect()
-            except ImportError:
-                pass
-                
-    def setup_cpu_affinity(self):
-        """Set CPU affinity for optimal performance on Ryzen 5 5600H."""
         try:
-            import psutil
-            import os
+            # Set number of solver iterations for balance of accuracy and speed
+            p.setPhysicsEngineParameter(numSolverIterations=50)
             
-            # Set process priority
-            current_process = psutil.Process()
-            if hasattr(psutil, 'HIGH_PRIORITY_CLASS'):
-                current_process.nice(psutil.HIGH_PRIORITY_CLASS)
-            else:
-                current_process.nice(-10)  # Linux/Mac
-                
-            # Set CPU affinity to use all cores
-            if hasattr(os, 'sched_setaffinity'):
-                os.sched_setaffinity(0, range(self.config.cpu_cores))
-                
-        except (ImportError, AttributeError, OSError) as e:
-            print(f"Could not set CPU affinity: {e}")
+            # Enable parallel processing
+            p.setPhysicsEngineParameter(enableConeFriction=1)
             
-    def optimize_for_ryzen_5600h(self):
-        """Apply all optimizations for Ryzen 5 5600H."""
-        print("Applying Ryzen 5 5600H optimizations...")
+            # Set contact processing threshold
+            p.setPhysicsEngineParameter(
+                contactBreakingThreshold=self.config.contact_breaking_threshold
+            )
+            
+            # Enable file caching for better performance
+            p.setPhysicsEngineParameter(enableFileCaching=1)
+            
+            # Set deterministic overlapping pairs
+            p.setPhysicsEngineParameter(deterministicOverlappingPairs=1)
+            
+            # Optimize solver type
+            p.setPhysicsEngineParameter(constraintSolverType=p.CONSTRAINT_SOLVER_LCP_PGS)
+            
+            print("PyBullet configured for optimal performance")
+            
+        except Exception as e:
+            print(f"Warning: Some PyBullet optimizations failed: {e}")
+            print("Continuing with default PyBullet settings")
         
-        self.setup_cpu_affinity()
-        self.configure_pybullet()
-        self.setup_memory_management()
-        
-        # Additional processor-specific optimizations
-        self._optimize_cache_usage()
-        self._setup_thread_scheduling()
-        
-        print("Optimizations applied successfully!")
-        
-    def _optimize_cache_usage(self):
-        """Optimize for L3 cache size (32MB on 5600H)."""
-        # Adjust buffer sizes to fit in L3 cache
-        optimal_buffer_size = min(self.config.buffer_size, 8192)  # 32MB / 4KB per buffer
-        self.config.buffer_size = optimal_buffer_size
-        
-    def _setup_thread_scheduling(self):
-        """Setup thread scheduling for optimal performance."""
-        import threading
-        
-        # Set thread stack size for better memory usage
-        threading.stack_size(1024 * 1024)  # 1MB stack size
-        
-    def monitor_performance(self):
-        """Monitor performance metrics."""
+    def monitor_performance(self) -> Dict[str, Any]:
+        """Monitor system performance metrics."""
         try:
-            import psutil
-            
             # CPU usage
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = psutil.cpu_percent(interval=0.1)
             
             # Memory usage
             memory = psutil.virtual_memory()
+            memory_percent = memory.percent
             
-            # Temperature monitoring (if available)
+            # Temperature (if available)
+            cpu_temperature = "N/A"
             try:
-                temperatures = psutil.sensors_temperatures()
-                cpu_temp = temperatures.get('coretemp', [{}])[0].get('current', 'N/A')
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    # Try to get CPU temperature
+                    for name, entries in temps.items():
+                        if 'cpu' in name.lower() or 'core' in name.lower():
+                            cpu_temperature = f"{entries[0].current}°C"
+                            break
             except:
-                cpu_temp = 'N/A'
-                
+                pass
+            
             return {
                 'cpu_percent': cpu_percent,
-                'memory_percent': memory.percent,
-                'memory_available': memory.available // (1024**3),  # GB
-                'cpu_temperature': cpu_temp
+                'memory_percent': memory_percent,
+                'cpu_temperature': cpu_temperature,
+                'available_memory': memory.available / (1024**3),  # GB
+                'timestamp': time.time()
             }
             
-        except ImportError:
-            return {'status': 'psutil not available for monitoring'}
-
-
-# Example usage
-def create_optimized_config():
-    """Create an optimized configuration for Ryzen 5 5600H."""
-    config = PerformanceConfig()
-    optimizer = PerformanceOptimizer(config)
-    
-    return config, optimizer
-
-
-# Performance tips for Ryzen 5 5600H
-PERFORMANCE_TIPS = """
-Performance Tips for Ryzen 5 5600H:
-
-1. Ensure your system is in High Performance power mode
-2. Close unnecessary applications to free up CPU resources
-3. Make sure your system has adequate cooling
-4. Consider enabling XMP/DOCP for RAM if available
-5. Use an SSD for better I/O performance
-6. Monitor CPU temperatures to avoid thermal throttling
-7. Consider disabling Windows Game Mode if it causes issues
-8. Ensure your PyBullet is compiled with proper optimization flags
-9. Use headless mode (enable_gui=False) for maximum performance
-10. Profile your specific simulation to identify bottlenecks
-"""
+        except Exception as e:
+            print(f"Performance monitoring error: {e}")
+            return {}
+            
+    def optimize_memory_usage(self):
+        """Optimize memory usage for better performance."""
+        import gc
+        
+        # Force garbage collection
+        gc.collect()
+        
+        # Set aggressive garbage collection thresholds
+        gc.set_threshold(500, 5, 5)
+        
+        print("Memory optimization applied")
+        
+    def adjust_quality_for_performance(self, target_fps: float = 60.0):
+        """Dynamically adjust simulation quality based on performance."""
+        perf_stats = self.monitor_performance()
+        
+        if not perf_stats:
+            return
+            
+        cpu_usage = perf_stats.get('cpu_percent', 0)
+        memory_usage = perf_stats.get('memory_percent', 0)
+        
+        # Adjust physics timestep based on CPU usage
+        if cpu_usage > 80:
+            # Reduce physics accuracy for better performance
+            self.config.physics_timestep = 1.0 / 120.0
+            print("Reduced physics timestep due to high CPU usage")
+        elif cpu_usage < 50:
+            # Increase physics accuracy if CPU can handle it
+            self.config.physics_timestep = 1.0 / 240.0
+            
+        # Adjust rendering based on memory usage
+        if memory_usage > 80:
+            self.config.enable_gui = False
+            print("Disabled GUI due to high memory usage")
+            
+    def get_optimization_recommendations(self) -> Dict[str, str]:
+        """Get recommendations for optimization based on current performance."""
+        perf_stats = self.monitor_performance()
+        recommendations = {}
+        
+        if not perf_stats:
+            return recommendations
+        
+    def set_process_priority_safely(self, priority_level: str = "normal"):
+        """Safely set process priority with proper error handling."""
+        try:
+            current_process = psutil.Process()
+            
+            if priority_level == "high":
+                try:
+                    import os
+                    if os.name == 'posix':  # Linux/Mac
+                        current_process.nice(-5)
+                    else:  # Windows
+                        current_process.nice(psutil.HIGH_PRIORITY_CLASS)
+                    print("Process priority set to HIGH")
+                except (psutil.AccessDenied, PermissionError):
+                    print("Cannot set high priority without elevated permissions")
+                    return False
+            elif priority_level == "low":
+                current_process.nice(10)
+                print("Process priority set to LOW")
+            else:
+                print("Process priority remains at DEFAULT")
+                
+            return True
+            
+        except Exception as e:
+            print(f"Priority setting error: {e}")
+            return False
+            
+        cpu_usage = perf_stats.get('cpu_percent', 0)
+        memory_usage = perf_stats.get('memory_percent', 0)
+        
+        if cpu_usage > 80:
+            recommendations['cpu'] = "Consider reducing physics timestep or number of objects"
+            
+        if memory_usage > 80:
+            recommendations['memory'] = "Consider reducing simulation complexity or disabling GUI"
+            
+        if cpu_usage < 30:
+            recommendations['performance'] = "CPU has headroom - can increase simulation complexity"
+            
+        return recommendations
