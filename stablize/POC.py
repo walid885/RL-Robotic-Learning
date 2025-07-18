@@ -28,7 +28,8 @@ class ImprovedQLearningAgent:
         self.gamma = 0.95
         
         # Initialize weights for policy network (state -> action)
-        self.weights = np.random.randn(action_dim, state_dim) * 0.1
+        self.weights = np.random.randn(action_dim, state_dim) * 0.01
+
         self.bias = np.zeros(action_dim)
         
         # Experience replay
@@ -417,7 +418,8 @@ class ValkyrieEnv(gym.Env):
             print(f"NaN detected in observation at step {self.current_step}")
             print(f"NaN indices: {np.where(np.isnan(obs))}")
         
-        reward, metrics = self._calculate_reward(action)
+        reward, metrics = self._calculate_base_reward(action)
+
         
         # Debug: Check reward for NaN
         if np.isnan(reward):
